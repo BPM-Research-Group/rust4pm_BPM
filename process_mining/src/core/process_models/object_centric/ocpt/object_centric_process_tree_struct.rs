@@ -68,13 +68,14 @@ impl OCPTNode {
     }
 
     ///
-    /// Returns `true` if a loop operator has at least two children or if all other operators
-    /// have at least one child.
+    /// Returns `true` if a loop operator has at least two children, an identity relation has
+    /// exactly one child, or all other operators have at least one child.
     ///
     pub fn check_children_valid(&self) -> bool {
         match self {
-            OCPTNode::Operator(op) => match op.operator_type {
+            OCPTNode::Operator(op) => match &op.operator_type {
                 OCPTOperatorType::Loop(_) => op.children.len() >= 2,
+                OCPTOperatorType::IdentityRelation(_) => op.children.len() == 1,
                 _ => !op.children.is_empty(),
             },
             OCPTNode::Leaf(_) => true,
@@ -188,6 +189,26 @@ impl OCPTNode {
 }
 
 ///
+/// Identity relation kind for unary identity wrappers
+///
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub enum IdentityRelationKind {
+    Sync,
+    ImpConcurrent,
+    ImpOrdered,
+}
+
+///
+/// Identity relation data for unary identity wrappers
+///
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct IdentityRelation {
+    pub left: Vec<ObjectType>,
+    pub right: Vec<ObjectType>,
+    pub kind: IdentityRelationKind,
+}
+
+///
 /// Operator type enum for [`OCPTOperator`]
 ///
 #[derive(Debug, Serialize, Deserialize)]
@@ -200,6 +221,8 @@ pub enum OCPTOperatorType {
     Concurrency,
     /// Loop operator that, if given, restricts a given number of repetitions
     Loop(Option<u32>),
+    /// Identity relation wrapper operator
+    IdentityRelation(IdentityRelation),
 }
 
 ///
@@ -369,6 +392,15 @@ impl OCPTOperator {
     }
 
     ///
+    /// Creates a new identity relation operator with a single child
+    ///
+    pub fn new_identity(rel: IdentityRelation, child: OCPTNode) -> Self {
+        let mut op = OCPTOperator::new(OCPTOperatorType::IdentityRelation(rel));
+        op.children.push(child);
+        op
+    }
+
+    ///
     /// Returns all descendant [`OCPTNode`]'s Uuids
     ///
     pub fn find_all_descendants_uuids(&self) -> Vec<&Uuid> {
@@ -443,7 +475,7 @@ impl OCPTOperator {
 
         // For each operator type, start and end event types and directly-follows relation are
         // identified accordingly
-        match self.operator_type {
+        match &self.operator_type {
             // For a sequence, we check for skippable (sub)parts an operator to identify start and
             // event types, and their directly-follows relations accordingly
             // The (Sub)parts are also skippable if they are unrelated or divergent
@@ -706,6 +738,18 @@ impl OCPTOperator {
                     })
                 }
             }
+            OCPTOperatorType::IdentityRelation(_) => {
+                if let Some((start_evs_child, end_evs_child, dfr_child, skip_child)) =
+                    children_dfr.first()
+                {
+                    start_ev_types = start_evs_child.clone();
+                    end_ev_types = end_evs_child.clone();
+                    directly_follow_ev_types = dfr_child.clone();
+                    skippable = *skip_child;
+                } else {
+                    skippable = true;
+                }
+            }
         }
 
         (
@@ -809,11 +853,29 @@ impl OCPTOperator {
         div_ob_types_per_node: &mut HashMap<Uuid, HashMap<&'a EventType, HashSet<&'a ObjectType>>>,
         rel_ob_types_per_node: &HashMap<Uuid, HashMap<&'a EventType, HashSet<&'a ObjectType>>>,
     ) {
-        match self.operator_type {
+        match &self.operator_type {
             // All descendants related event and object types are also divergent since they have a
             // loop operator as ancestor
             OCPTOperatorType::Loop(_) => {
                 self.change_descendants_to_related(div_ob_types_per_node, rel_ob_types_per_node);
+            }
+            OCPTOperatorType::IdentityRelation(_) => {
+                if let Some(child) = self.children.first() {
+                    match child {
+                        OCPTNode::Operator(op) => {
+                            op.compute_div(div_ob_types_per_node, rel_ob_types_per_node);
+                        }
+                        OCPTNode::Leaf(leaf) => match &leaf.activity_label {
+                            OCPTLeafLabel::Activity(leaf_label) => {
+                                div_ob_types_per_node
+                                    .entry(leaf.uuid)
+                                    .or_default()
+                                    .insert(leaf_label, leaf.divergent_ob_types.iter().collect());
+                            }
+                            OCPTLeafLabel::Tau => {}
+                        },
+                    }
+                }
             }
             _ => {
                 // Call the routine for all children to make sure that their divergent object
@@ -850,11 +912,16 @@ impl OCPTOperator {
         opt_ob_types_per_node: &mut HashMap<Uuid, HashMap<&'a EventType, HashSet<&'a ObjectType>>>,
         rel_ob_types_per_node: &HashMap<Uuid, HashMap<&'a EventType, HashSet<&'a ObjectType>>>,
     ) {
-        match self.operator_type {
+        match &self.operator_type {
             // All descendants related object types are also optional since they have an
             // exclusive choice operator as ancestor
             OCPTOperatorType::ExclusiveChoice => {
                 self.change_descendants_to_related(opt_ob_types_per_node, rel_ob_types_per_node);
+            }
+            OCPTOperatorType::IdentityRelation(_) => {
+                if let Some(OCPTNode::Operator(op)) = self.children.first() {
+                    op.compute_opt(opt_ob_types_per_node, rel_ob_types_per_node);
+                }
             }
             // Otherwise identify optionality from divergence
             _ => {
@@ -1037,7 +1104,7 @@ impl OCPTOperator {
         competitor_ob_type: &ObjectType,
         root_opt_ob_types: &HashMap<&EventType, HashSet<&ObjectType>>,
     ) -> bool {
-        match self.operator_type {
+        match &self.operator_type {
             OCPTOperatorType::Sequence | OCPTOperatorType::Concurrency => {
                 for child in self.children.iter() {
                     if !check_conv_subroutine_for_competitor(
@@ -1070,6 +1137,18 @@ impl OCPTOperator {
                 competitor_ob_type,
                 root_opt_ob_types,
             ),
+            OCPTOperatorType::IdentityRelation(_) => {
+                if let Some(child) = self.children.first() {
+                    check_conv_subroutine_for_competitor(
+                        child,
+                        candidate_ob_type,
+                        competitor_ob_type,
+                        root_opt_ob_types,
+                    )
+                } else {
+                    true
+                }
+            }
         }
     }
 
@@ -1166,7 +1245,7 @@ impl OCPTOperator {
         competitor_ob_type: &ObjectType,
         root_opt_ob_types: &HashMap<&EventType, HashSet<&ObjectType>>,
     ) -> bool {
-        match self.operator_type {
+        match &self.operator_type {
             OCPTOperatorType::Sequence | OCPTOperatorType::Concurrency => {
                 for child in self.children.iter() {
                     if !check_def_subroutine_for_competitor(
@@ -1199,6 +1278,18 @@ impl OCPTOperator {
                 competitor_ob_type,
                 root_opt_ob_types,
             ),
+            OCPTOperatorType::IdentityRelation(_) => {
+                if let Some(child) = self.children.first() {
+                    check_def_subroutine_for_competitor(
+                        child,
+                        candidate_ob_type,
+                        competitor_ob_type,
+                        root_opt_ob_types,
+                    )
+                } else {
+                    true
+                }
+            }
         }
     }
 }
