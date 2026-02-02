@@ -169,12 +169,13 @@ fn main() -> ExitCode {
                 let mut final_res = res.clone();
                 if let Some(id) = res.as_str() {
                     let state_guard = state.items.read().unwrap();
-                    if let Some(item) = state_guard.get(id)
-                        && let Ok(val) = item.to_value()
-                    {
-                        final_res = val;
+                    if let Some(item) = state_guard.get(id) {
+                        if let Ok(val) = item.to_value() {
+                            final_res = val;
+                        }
                     }
                 }
+
                 println!("{}", serde_json::to_string_pretty(&final_res).unwrap());
             }
         }
