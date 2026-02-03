@@ -101,6 +101,76 @@ pub fn compute_footprint_conformance(locel: &IndexLinkedOCEL, ocpt: &OCPT) -> Fo
     }
 }
 
+pub fn compute_footprint_conformance_ocpt_vs_ocpt(
+    log_ocpt: &OCPT,
+    model_ocpt: &OCPT,
+) -> FootprintConformance {
+    let log_abs = OCLanguageAbstraction::create_from_oc_process_tree(log_ocpt);
+    let model_abs = OCLanguageAbstraction::create_from_oc_process_tree(model_ocpt);
+
+    let log_rel = invert_ob_type_map(&log_abs.related_ev_type_per_ob_type);
+    let model_rel = invert_ob_type_map(&model_abs.related_ev_type_per_ob_type);
+    let log_div = invert_ob_type_map(&log_abs.divergent_ev_type_per_ob_type);
+    let model_div = invert_ob_type_map(&model_abs.divergent_ev_type_per_ob_type);
+    let log_con = invert_ob_type_map(&log_abs.convergent_ev_type_per_ob_type);
+    let model_con = invert_ob_type_map(&model_abs.convergent_ev_type_per_ob_type);
+    let log_def = invert_ob_type_map(&log_abs.deficient_ev_type_per_ob_type);
+    let model_def = invert_ob_type_map(&model_abs.deficient_ev_type_per_ob_type);
+    let log_opt = invert_ob_type_map(&log_abs.optional_ev_type_per_ob_type);
+    let model_opt = invert_ob_type_map(&model_abs.optional_ev_type_per_ob_type);
+
+    let (alphabet, object_types, total_activities) =
+        build_pattern_universe(&log_rel, &model_rel, &log_abs, &model_abs);
+
+    let (control_log, control_model) =
+        build_control_patterns(&log_abs, &model_abs, &alphabet, &object_types);
+    let (multiplicity_log, multiplicity_model) = build_multiplicity_patterns(
+        &log_rel,
+        &log_div,
+        &log_def,
+        &log_con,
+        &log_opt,
+        &model_rel,
+        &model_div,
+        &model_def,
+        &model_con,
+        &model_opt,
+        &total_activities,
+        &object_types,
+    );
+
+    let log_ident = compute_model_identity_implications(log_ocpt, &log_rel);
+    let model_ident = compute_model_identity_implications(model_ocpt, &model_rel);
+    let (identity_log, identity_model) = build_identity_patterns(
+        &log_ident,
+        &model_ident,
+        &log_rel,
+        &model_rel,
+        &total_activities,
+        &object_types,
+    );
+
+    let (control_fitness, control_precision) = category_scores(&control_log, &control_model);
+    let (multiplicity_fitness, multiplicity_precision) =
+        category_scores(&multiplicity_log, &multiplicity_model);
+    let (identity_fitness, identity_precision) = category_scores(&identity_log, &identity_model);
+
+    let overall_fitness = (control_fitness + multiplicity_fitness + identity_fitness) / 3.0;
+    let overall_precision =
+        (control_precision + multiplicity_precision + identity_precision) / 3.0;
+
+    FootprintConformance {
+        control_fitness,
+        control_precision,
+        multiplicity_fitness,
+        multiplicity_precision,
+        identity_fitness,
+        identity_precision,
+        overall_fitness,
+        overall_precision,
+    }
+}
+
 fn category_scores(log_values: &[bool], model_values: &[bool]) -> (f64, f64) {
     let mut total_log = 0usize;
     let mut total_model = 0usize;
