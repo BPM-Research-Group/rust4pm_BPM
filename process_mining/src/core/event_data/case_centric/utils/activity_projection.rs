@@ -91,8 +91,10 @@ impl<'a> From<&mut XESParsingTraceStream<'a>> for EventLogActivityProjection {
 #[register_binding]
 /// Convert an [`EventLog`] into an [`EventLogActivityProjection`]
 ///
-/// All traces with the same activity sequence are aggregated into one trace with a frequency count
-fn log_to_activity_projection(log: &EventLog) -> EventLogActivityProjection {
+/// All traces with the same activity sequence are aggregated into one trace with a frequency count.
+///
+/// This effectively constructs all trace variants, with their count.
+pub fn log_to_activity_projection(log: &EventLog) -> EventLogActivityProjection {
     log.into()
 }
 
