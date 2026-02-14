@@ -33,13 +33,13 @@ pub fn add_init_exit_events_to_ocel(ocel: OCEL) -> OCEL {
         .get_all_obs()
         .flat_map(|obi| {
             let ob = locel.get_full_ob(&obi);
-            let iter = locel
+            let mut iter = locel
                 .get_e2o_rev(&obi)
                 .map(|(_q, e)| locel.get_full_ev(e).time)
                 .sorted();
             let first_ev = iter.clone().next();
             let first_ev_time = first_ev.unwrap_or_default();
-            let last_ev = iter.last();
+            let last_ev = iter.next_back();
             let last_ev_time = last_ev.unwrap_or_default();
             vec![
                 OCELEvent {

@@ -1,5 +1,5 @@
 //! Footprint-based OCPT conformance (control flow, multiplicity, identity).
-//! 
+//!
 //! This follows the Python implementation in
 //! `OCPT-Conformance-Checking/src/conformance.py` and its helpers,
 //! while reusing Rust abstractions where available. Comments note
@@ -13,24 +13,35 @@ use crate::core::event_data::object_centric::linked_ocel::index_linked_ocel::{
 };
 use crate::core::event_data::object_centric::linked_ocel::{IndexLinkedOCEL, LinkedOCELAccess};
 use crate::core::process_models::object_centric::ocpt::object_centric_process_tree_struct::{
-    IdentityRelationKind, OCPTOperatorType, OCPTNode, OCPT,
+    IdentityRelationKind, OCPTNode, OCPTOperatorType, OCPT,
 };
 use crate::core::process_models::object_centric::ocpt::{EventType, ObjectType};
 
 type IdentityPattern = (ObjectType, ObjectType, EventType, EventType);
+type MultiplicityMap = HashMap<EventType, HashSet<ObjectType>>;
 
+/// Footprint-based conformance scores for control-flow, multiplicity, and identity dimensions.
 #[derive(Debug, Clone)]
 pub struct FootprintConformance {
+    /// Fitness score for control-flow patterns.
     pub control_fitness: f64,
+    /// Precision score for control-flow patterns.
     pub control_precision: f64,
+    /// Fitness score for multiplicity patterns.
     pub multiplicity_fitness: f64,
+    /// Precision score for multiplicity patterns.
     pub multiplicity_precision: f64,
+    /// Fitness score for identity-relation patterns.
     pub identity_fitness: f64,
+    /// Precision score for identity-relation patterns.
     pub identity_precision: f64,
+    /// Average fitness across control-flow, multiplicity, and identity scores.
     pub overall_fitness: f64,
+    /// Average precision across control-flow, multiplicity, and identity scores.
     pub overall_precision: f64,
 }
 
+/// Computes footprint-based conformance between an OCEL log and an OCPT model.
 pub fn compute_footprint_conformance(locel: &IndexLinkedOCEL, ocpt: &OCPT) -> FootprintConformance {
     let log_abs = OCLanguageAbstraction::create_from_ocel(locel);
     let model_abs = OCLanguageAbstraction::create_from_oc_process_tree(ocpt);
@@ -49,23 +60,11 @@ pub fn compute_footprint_conformance(locel: &IndexLinkedOCEL, ocpt: &OCPT) -> Fo
     let (alphabet, object_types, total_activities) =
         build_pattern_universe(&log_rel, &model_rel, &log_abs, &model_abs);
 
-    let (control_log, control_model) = build_control_patterns(
-        &log_abs,
-        &model_abs,
-        &alphabet,
-        &object_types,
-    );
+    let (control_log, control_model) =
+        build_control_patterns(&log_abs, &model_abs, &alphabet, &object_types);
     let (multiplicity_log, multiplicity_model) = build_multiplicity_patterns(
-        &log_rel,
-        &log_div,
-        &log_def,
-        &log_con,
-        &log_opt,
-        &model_rel,
-        &model_div,
-        &model_def,
-        &model_con,
-        &model_opt,
+        [&log_rel, &log_div, &log_def, &log_con, &log_opt],
+        [&model_rel, &model_div, &model_def, &model_con, &model_opt],
         &total_activities,
         &object_types,
     );
@@ -101,6 +100,7 @@ pub fn compute_footprint_conformance(locel: &IndexLinkedOCEL, ocpt: &OCPT) -> Fo
     }
 }
 
+/// Computes footprint-based conformance between two OCPT process trees.
 pub fn compute_footprint_conformance_ocpt_vs_ocpt(
     log_ocpt: &OCPT,
     model_ocpt: &OCPT,
@@ -125,16 +125,8 @@ pub fn compute_footprint_conformance_ocpt_vs_ocpt(
     let (control_log, control_model) =
         build_control_patterns(&log_abs, &model_abs, &alphabet, &object_types);
     let (multiplicity_log, multiplicity_model) = build_multiplicity_patterns(
-        &log_rel,
-        &log_div,
-        &log_def,
-        &log_con,
-        &log_opt,
-        &model_rel,
-        &model_div,
-        &model_def,
-        &model_con,
-        &model_opt,
+        [&log_rel, &log_div, &log_def, &log_con, &log_opt],
+        [&model_rel, &model_div, &model_def, &model_con, &model_opt],
         &total_activities,
         &object_types,
     );
@@ -156,8 +148,7 @@ pub fn compute_footprint_conformance_ocpt_vs_ocpt(
     let (identity_fitness, identity_precision) = category_scores(&identity_log, &identity_model);
 
     let overall_fitness = (control_fitness + multiplicity_fitness + identity_fitness) / 3.0;
-    let overall_precision =
-        (control_precision + multiplicity_precision + identity_precision) / 3.0;
+    let overall_precision = (control_precision + multiplicity_precision + identity_precision) / 3.0;
 
     FootprintConformance {
         control_fitness,
@@ -297,37 +288,22 @@ fn build_control_patterns(
 }
 
 fn build_multiplicity_patterns(
-    log_rel: &HashMap<EventType, HashSet<ObjectType>>,
-    log_div: &HashMap<EventType, HashSet<ObjectType>>,
-    log_def: &HashMap<EventType, HashSet<ObjectType>>,
-    log_con: &HashMap<EventType, HashSet<ObjectType>>,
-    log_opt: &HashMap<EventType, HashSet<ObjectType>>,
-    model_rel: &HashMap<EventType, HashSet<ObjectType>>,
-    model_div: &HashMap<EventType, HashSet<ObjectType>>,
-    model_def: &HashMap<EventType, HashSet<ObjectType>>,
-    model_con: &HashMap<EventType, HashSet<ObjectType>>,
-    model_opt: &HashMap<EventType, HashSet<ObjectType>>,
+    log_maps: [&MultiplicityMap; 5],
+    model_maps: [&MultiplicityMap; 5],
     total_activities: &[EventType],
     object_types: &[ObjectType],
 ) -> (Vec<bool>, Vec<bool>) {
     // NOTE: The paper uses multiplicity patterns rel_ot>1, rel_ot<1, rel_a>1, rel_a<1.
     // The Python implementation instead uses related/divergent/deficient/convergent/optional
     // patterns from the abstractions. We mirror the Python behavior here.
-    let log_maps = [log_rel, log_div, log_def, log_con, log_opt];
-    let model_maps = [model_rel, model_div, model_def, model_con, model_opt];
-
     let mut log_values = Vec::new();
     let mut model_values = Vec::new();
 
     for a in total_activities {
         for ot in object_types {
-            for i in 0..5usize {
-                let log_has = log_maps[i]
-                    .get(a)
-                    .is_some_and(|set| set.contains(ot));
-                let model_has = model_maps[i]
-                    .get(a)
-                    .is_some_and(|set| set.contains(ot));
+            for (log_map, model_map) in log_maps.iter().zip(model_maps.iter()) {
+                let log_has = log_map.get(a).is_some_and(|set| set.contains(ot));
+                let model_has = model_map.get(a).is_some_and(|set| set.contains(ot));
                 log_values.push(log_has);
                 model_values.push(model_has);
             }
@@ -447,14 +423,12 @@ fn compute_log_identity_implications(
 
                     let mut subrelations: Vec<(EventIndex, Vec<ObjectIndex>)> = Vec::new();
                     if let Some(events) = events_by_type.get(a) {
-                        subrelations.extend(collect_event_objects_for_types(
-                            locel, events, ot1, ot2,
-                        ));
+                        subrelations
+                            .extend(collect_event_objects_for_types(locel, events, ot1, ot2));
                     }
                     if let Some(events) = events_by_type.get(b) {
-                        subrelations.extend(collect_event_objects_for_types(
-                            locel, events, ot1, ot2,
-                        ));
+                        subrelations
+                            .extend(collect_event_objects_for_types(locel, events, ot1, ot2));
                     }
 
                     if subrelations.is_empty() {
@@ -528,10 +502,7 @@ fn check_implication(
 
     for (_ev, objs) in subrelations {
         for ob in objs {
-            object_hashes
-                .entry(*ob)
-                .or_default()
-                .insert(objs.clone());
+            object_hashes.entry(*ob).or_default().insert(objs.clone());
         }
     }
 
@@ -634,17 +605,12 @@ fn collect_activities(node: &OCPTNode) -> HashSet<EventType> {
     result
 }
 
-fn close_identity_patterns(
-    raw: HashSet<IdentityPattern>,
-) -> HashSet<IdentityPattern> {
+fn close_identity_patterns(raw: HashSet<IdentityPattern>) -> HashSet<IdentityPattern> {
     let mut by_activity: HashMap<(EventType, EventType), HashSet<(ObjectType, ObjectType)>> =
         HashMap::new();
 
     for (ot1, ot2, a, b) in raw {
-        by_activity
-            .entry((a, b))
-            .or_default()
-            .insert((ot1, ot2));
+        by_activity.entry((a, b)).or_default().insert((ot1, ot2));
     }
 
     let mut result: HashSet<IdentityPattern> = HashSet::new();
@@ -658,7 +624,9 @@ fn close_identity_patterns(
     result
 }
 
-fn transitive_closure(edges: HashSet<(ObjectType, ObjectType)>) -> HashSet<(ObjectType, ObjectType)> {
+fn transitive_closure(
+    edges: HashSet<(ObjectType, ObjectType)>,
+) -> HashSet<(ObjectType, ObjectType)> {
     let mut adj: HashMap<ObjectType, HashSet<ObjectType>> = HashMap::new();
     let mut nodes: HashSet<ObjectType> = HashSet::new();
     for (from, to) in &edges {

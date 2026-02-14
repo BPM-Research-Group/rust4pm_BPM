@@ -193,8 +193,11 @@ impl OCPTNode {
 ///
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum IdentityRelationKind {
+    /// Symmetric identity relation between left and right object types.
     Sync,
+    /// Implicitly concurrent identity relation.
     ImpConcurrent,
+    /// Implicitly ordered identity relation.
     ImpOrdered,
 }
 
@@ -203,8 +206,11 @@ pub enum IdentityRelationKind {
 ///
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct IdentityRelation {
+    /// Source-side object types used in the relation.
     pub left: Vec<ObjectType>,
+    /// Target-side object types used in the relation.
     pub right: Vec<ObjectType>,
+    /// Semantics of the identity relation.
     pub kind: IdentityRelationKind,
 }
 
