@@ -13,6 +13,9 @@ pub fn export_ocel_sqlite_to_path<P: AsRef<std::path::Path>>(
     ocel: &OCEL,
     path: P,
 ) -> Result<(), DatabaseError> {
+    if path.as_ref().exists() {
+        let _ = std::fs::remove_file(&path);
+    }
     let con = Connection::open(path)?;
     export_ocel_to_sql_con(&con, ocel)
 }
@@ -24,7 +27,7 @@ pub fn export_ocel_sqlite_to_path<P: AsRef<std::path::Path>>(
 pub fn export_ocel_sqlite_to_vec(ocel: &OCEL) -> Result<Vec<u8>, DatabaseError> {
     let con = Connection::open_in_memory()?;
     export_ocel_to_sql_con(&con, ocel)?;
-    let data = con.serialize(rusqlite::DatabaseName::Main)?;
+    let data = con.serialize(rusqlite::MAIN_DB)?;
     Ok((*data).to_vec())
 }
 
